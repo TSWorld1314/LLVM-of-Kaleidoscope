@@ -1,18 +1,22 @@
-#include "llvm/ADT/APFloat.h"
-#include "llvm/ADT/STLExtras.h"
-#include "llvm/IR/BasicBlock.h"
-#include "llvm/IR/Constants.h"
-#include "llvm/IR/DerivedTypes.h"
-#include "llvm/IR/Function.h"
+#include "KaleidoscopeJIT.h"                            // JIT 头文件
+#include "llvm/ADT/APFloat.h"                           // arbitrary precision float
+#include "llvm/ADT/STLExtras.h"                         // 标准库拓展
+#include "llvm/IR/BasicBlock.h"                         // Basic Block
+#include "llvm/IR/Constants.h"                          // 常量
+#include "llvm/IR/DerivedTypes.h"                       // derived types 的实现
+#include "llvm/IR/Function.h"                           // 函数
 #include "llvm/IR/Instructions.h"
-#include "llvm/IR/IRBuilder.h"
-#include "llvm/IR/LLVMContext.h"
-#include "llvm/IR/Module.h"
-#include "llvm/IR/Type.h"
-#include "llvm/IR/Verifier.h"
-#include "llvm/Support/TargetSelect.h"
-#include "llvm/Target/TargetMachine.h"
-#include "KaleidoscopeJIT.h"
+#include "llvm/IR/IRBuilder.h"                          // IRBuilder
+#include "llvm/IR/LLVMContext.h"                        // LLVMContext 负责 global 类型的管理
+#include "llvm/IR/LegacyPassManager.h"                  // 保存，维护，优化 Pass 的执行
+#include "llvm/IR/Module.h"                             // Module
+#include "llvm/IR/Type.h"                               // 类型声明
+#include "llvm/IR/Verifier.h"                           // 函数验证
+#include "llvm/Support/TargetSelect.h"                  // 用以确保特定类的目标被链接到主应用的执行程序，并正确初始化
+#include "llvm/Target/TargetMachine.h"                  // TargetMachine LLVMTargetMachine
+#include "llvm/Transforms/InstCombine/InstCombine.h"    // instcombine pass
+#include "llvm/Transforms/Scalar.h"                     // expose pass
+#include "llvm/Transforms/Scalar/GVN.h"                 // Global Value Numbering pass
 #include <algorithm>
 #include <cassert>
 #include <cctype>
@@ -26,7 +30,7 @@
 #include <vector>
 
 using namespace llvm;
-using namespace llvm::orc;
+using namespace llvm::orc;                              // On Request Compilation
 
 //===----------------------------------------------------------------------===//
 // Lexer
