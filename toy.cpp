@@ -68,6 +68,7 @@ static int gettok() {
   static int LastChar = ' ';
 
   // Skip any whitespace.
+  // 跳过所有:' ','\r','\n','\t','\v','\f'
   while (isspace(LastChar))
     LastChar = getchar();
 
@@ -139,6 +140,7 @@ class ExprAST {
 public:
   virtual ~ExprAST() = default;
 
+  // 代码生成对应代码，llvm::Value 类型
   virtual Value *codegen() = 0;
 };
 
@@ -680,10 +682,23 @@ static std::unique_ptr<PrototypeAST> ParseExtern() {
 //===----------------------------------------------------------------------===//
 
 static std::unique_ptr<KaleidoscopeJIT> TheJIT;
+
+// LLVMContext 针对每一个线程记录了线程本地的变量，即对于每一个LLVM的线程，
+// 都对应了这样一个context实例
 static std::unique_ptr<LLVMContext> TheContext;
+
+// Builder 是用于简化 LLVM 指令生成的辅助对象。IRBuilder 类模板的实例
+// 可用于跟踪当前插入指令的位置，同时还带有用于生成新指令的方法
 static std::unique_ptr<IRBuilder<>> Builder;
+
+// TheModule 是 LLVM 中用于存放代码段中所有函数和全局变量的结构。
+// 从某种意义讲，可以把它当作 LLVM IR 代码的顶层容器。
 static std::unique_ptr<Module> TheModule;
+
+// NameValues 映射表用于记录代码的符号表。在这一版的 Kaleidoscope 中，
+// 可引用的变量只有函数的参数。因此，在生成函数体代码时，函数的参数就存放在这张表中。
 static std::map<std::string, AllocaInst *> NamedValues;
+
 static std::map<std::string, std::unique_ptr<PrototypeAST>> FunctionProtos;
 static ExitOnError ExitOnErr;
 
@@ -717,11 +732,15 @@ static AllocaInst *CreateEntryBlockAlloca(Function *TheFunction,
 }
 
 Value *NumberExprAST::codegen() {
+  // LLVM IR 中的数值常量是由 ConstantFP 类表示的。
+  // 在其内部，具体数值由 APFloat(Arbitrary Precision Float,可用于存储任意精度的浮点数常量)表示。
+  // 在 LLVM IR 内部，常量都只有一份，并且是共享的。
   return ConstantFP::get(*TheContext, APFloat(Val));
 }
 
 Value *VariableExprAST::codegen() {
   // Look this variable up in the function.
+  // 表达式被转为匿名函数，所以变量都是函数的参数
   Value *V = NamedValues[Name];
   if (!V)
     return LogErrorV("Unknown variable name");
@@ -797,6 +816,7 @@ Value *BinaryExprAST::codegen() {
 
 Value *CallExprAST::codegen() {
   // Look up the name in the global module table.
+  // 查找全局变量和函数
   Function *CalleeF = getFunction(Callee);
   if (!CalleeF)
     return LogErrorV("Unknown function referenced");
@@ -1018,15 +1038,18 @@ Value *VarExprAST::codegen() {
 
 Function *PrototypeAST::codegen() {
   // Make the function type:  double(double,double) etc.
+  // n 个 double
   std::vector<Type *> Doubles(Args.size(), Type::getDoubleTy(*TheContext));
   FunctionType *FT =
-      FunctionType::get(Type::getDoubleTy(*TheContext), Doubles, false);
+      FunctionType::get(Type::getDoubleTy(*TheContext), Doubles, false);        // 返回值类型，参数列表，参数个数不可变
 
+  // 函数信息，链接方式，函数名，注册在 TheModule 的符号表
   Function *F =
       Function::Create(FT, Function::ExternalLinkage, Name, TheModule.get());
 
   // Set names for all arguments.
   unsigned Idx = 0;
+  // 给函数 F 赋以对应的函数名称
   for (auto &Arg : F->args())
     Arg.setName(Args[Idx++]);
 
@@ -1046,6 +1069,7 @@ Function *FunctionAST::codegen() {
   // reference to it for use below.
   auto &P = *Proto;
   FunctionProtos[Proto->getName()] = std::move(Proto);
+  // 查询在此之前有没有被定义
   Function *TheFunction = getFunction(P.getName());
   if (!TheFunction)
     return nullptr;
@@ -1056,10 +1080,12 @@ Function *FunctionAST::codegen() {
 
   // Create a new basic block to start insertion into.
   BasicBlock *BB = BasicBlock::Create(*TheContext, "entry", TheFunction);
+  // 新指令插入到尾部
   Builder->SetInsertPoint(BB);
 
   // Record the function arguments in the NamedValues map.
   NamedValues.clear();
+  // 参数列表插入
   for (auto &Arg : TheFunction->args()) {
     // Create an alloca for this variable.
     AllocaInst *Alloca = CreateEntryBlockAlloca(TheFunction, Arg.getName());
@@ -1071,6 +1097,7 @@ Function *FunctionAST::codegen() {
     NamedValues[std::string(Arg.getName())] = Alloca;
   }
 
+  // 进行函数的生成
   if (Value *RetVal = Body->codegen()) {
     // Finish off the function.
     Builder->CreateRet(RetVal);
@@ -1114,7 +1141,7 @@ ThreadSafeModule irgenAndTakeOwnership(FunctionAST &FnAST,
   } else
     report_fatal_error("Couldn't compile lazily JIT'd function");
 }
-
+// 顶层解析，看看代码是否生成成功
 static void HandleDefinition() {
   if (auto FnAST = ParseDefinition()) {
     FunctionProtos[FnAST->getProto().getName()] =
